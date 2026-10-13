@@ -1,0 +1,382 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   THEME DESIGN SYSTEM TOKENS
+   ========================================================================== */
+:root,
+[data-theme="midnight-pulse"] {
+  --theme-bg-primary: #111311;
+  --theme-bg-secondary: #151713;
+  --theme-bg-card: #1A1D19;
+  --theme-bg-elevated: #22251F;
+  --theme-accent-primary: #C6FF3D;
+  --theme-accent-secondary: #FF7138;
+  --theme-text-primary: #F3F0E8;
+  --theme-text-secondary: #A5A89F;
+  --theme-text-muted: #777C72;
+  --theme-border: #353830;
+  --theme-border-subtle: #292D27;
+  --theme-accent-contrast: #111311;
+  --theme-overlay: rgba(17, 19, 17, 0.85);
+  --theme-grid-line: #292D27;
+}
+
+[data-theme="clean-light"] {
+  --theme-bg-primary: #F8F7F4;
+  --theme-bg-secondary: #EFECE6;
+  --theme-bg-card: #FFFFFF;
+  --theme-bg-elevated: #F2EFEB;
+  --theme-accent-primary: #1E5E2E;
+  --theme-accent-secondary: #C25E2E;
+  --theme-text-primary: #181A17;
+  --theme-text-secondary: #494D45;
+  --theme-text-muted: #767B71;
+  --theme-border: #D8D4CA;
+  --theme-border-subtle: #E6E2D8;
+  --theme-accent-contrast: #FFFFFF;
+  --theme-overlay: rgba(24, 26, 23, 0.65);
+  --theme-grid-line: #E5E0D5;
+}
+
+[data-theme="graphite-ember"] {
+  --theme-bg-primary: #161719;
+  --theme-bg-secondary: #1D1F23;
+  --theme-bg-card: #23252B;
+  --theme-bg-elevated: #2B2E35;
+  --theme-accent-primary: #FF6B35;
+  --theme-accent-secondary: #E5A93C;
+  --theme-text-primary: #F5F5F7;
+  --theme-text-secondary: #A3A7AF;
+  --theme-text-muted: #6E737D;
+  --theme-border: #383B44;
+  --theme-border-subtle: #2C2F37;
+  --theme-accent-contrast: #FFFFFF;
+  --theme-overlay: rgba(22, 23, 25, 0.85);
+  --theme-grid-line: #282A31;
+}
+
+[data-theme="warm-sand"] {
+  --theme-bg-primary: #F2EDE4;
+  --theme-bg-secondary: #E6DFCF;
+  --theme-bg-card: #FAF7F2;
+  --theme-bg-elevated: #DCD4C4;
+  --theme-accent-primary: #B34B28;
+  --theme-accent-secondary: #A8652B;
+  --theme-text-primary: #221E1A;
+  --theme-text-secondary: #58514A;
+  --theme-text-muted: #887F75;
+  --theme-border: #D2C8B6;
+  --theme-border-subtle: #DED5C5;
+  --theme-accent-contrast: #FFFFFF;
+  --theme-overlay: rgba(34, 30, 26, 0.65);
+  --theme-grid-line: #DCD4C4;
+}
+
+@layer base {
+  body {
+    background-color: var(--theme-bg-primary);
+    color: var(--theme-text-primary);
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+}
+
+/* ==========================================================================
+   GLOBAL THEME VARIABLE OVERRIDES
+   ========================================================================== */
+
+/* Universal smooth transition when switching themes */
+body, aside, header, main, nav, div, button, input, select, textarea, span, p, h1, h2, h3, h4 {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Background mappings */
+[data-theme] .bg-\[\#111311\],
+[data-theme].bg-\[\#111311\] {
+  background-color: var(--theme-bg-primary) !important;
+}
+
+[data-theme] .bg-\[\#151713\] {
+  background-color: var(--theme-bg-secondary) !important;
+}
+
+[data-theme] .bg-\[\#1A1D19\] {
+  background-color: var(--theme-bg-card) !important;
+}
+
+[data-theme] .bg-\[\#22251F\] {
+  background-color: var(--theme-bg-elevated) !important;
+}
+
+/* Accent backgrounds */
+[data-theme] .bg-\[\#C6FF3D\] {
+  background-color: var(--theme-accent-primary) !important;
+  color: var(--theme-accent-contrast) !important;
+}
+
+[data-theme] .bg-\[\#C6FF3D\] * {
+  color: var(--theme-accent-contrast) !important;
+}
+
+[data-theme] .bg-\[\#C6FF3D\].text-\[\#111311\] {
+  color: var(--theme-accent-contrast) !important;
+}
+
+[data-theme] .bg-\[\#C6FF3D\] svg {
+  stroke: var(--theme-accent-contrast) !important;
+}
+
+[data-theme] .bg-\[\#C6FF3D\] svg.fill-\[\#111311\] {
+  fill: var(--theme-accent-contrast) !important;
+}
+
+[data-theme] .bg-\[\#FF7138\] {
+  background-color: var(--theme-accent-secondary) !important;
+  color: #FFFFFF !important;
+}
+
+[data-theme] .bg-\[\#FF7138\] *,
+[data-theme] .bg-\[\#FF7138\].text-\[\#111311\] {
+  color: #FFFFFF !important;
+}
+
+[data-theme] .hover\:text-\[\#111311\]:hover {
+  color: var(--theme-accent-contrast) !important;
+}
+
+/* Text mappings */
+[data-theme] .text-\[\#F3F0E8\] {
+  color: var(--theme-text-primary) !important;
+}
+
+[data-theme] .text-\[\#A5A89F\] {
+  color: var(--theme-text-secondary) !important;
+}
+
+[data-theme] .text-\[\#777C72\] {
+  color: var(--theme-text-muted) !important;
+}
+
+[data-theme] .text-\[\#C6FF3D\] {
+  color: var(--theme-accent-primary) !important;
+}
+
+[data-theme] .text-\[\#FF7138\] {
+  color: var(--theme-accent-secondary) !important;
+}
+
+/* Border mappings */
+[data-theme] .border-\[\#353830\] {
+  border-color: var(--theme-border) !important;
+}
+
+[data-theme] .border-\[\#292D27\] {
+  border-color: var(--theme-border-subtle) !important;
+}
+
+[data-theme] .border-\[\#22251F\] {
+  border-color: var(--theme-border-subtle) !important;
+}
+
+[data-theme] .border-\[\#C6FF3D\] {
+  border-color: var(--theme-accent-primary) !important;
+}
+
+[data-theme] .border-\[\#FF7138\] {
+  border-color: var(--theme-accent-secondary) !important;
+}
+
+/* Hover & Focus states */
+[data-theme] .hover\:bg-\[\#22251F\]:hover {
+  background-color: var(--theme-bg-elevated) !important;
+}
+
+[data-theme] .hover\:bg-\[\#1A1D19\]:hover {
+  background-color: var(--theme-bg-card) !important;
+}
+
+[data-theme] .hover\:bg-\[\#151713\]:hover {
+  background-color: var(--theme-bg-secondary) !important;
+}
+
+[data-theme] .hover\:bg-\[\#C6FF3D\]\/90:hover {
+  background-color: var(--theme-accent-primary) !important;
+  opacity: 0.9 !important;
+}
+
+[data-theme] .hover\:border-\[\#C6FF3D\]:hover,
+[data-theme] .hover\:border-\[\#C6FF3D\]\/60:hover,
+[data-theme] .hover\:border-\[\#C6FF3D\]\/50:hover {
+  border-color: var(--theme-accent-primary) !important;
+}
+
+[data-theme] .hover\:border-\[\#FF7138\]:hover {
+  border-color: var(--theme-accent-secondary) !important;
+}
+
+[data-theme] .hover\:text-\[\#C6FF3D\]:hover {
+  color: var(--theme-accent-primary) !important;
+}
+
+[data-theme] .hover\:text-\[\#F3F0E8\]:hover {
+  color: var(--theme-text-primary) !important;
+}
+
+[data-theme] .focus\:border-\[\#C6FF3D\]:focus {
+  border-color: var(--theme-accent-primary) !important;
+}
+
+[data-theme] .focus\:ring-\[\#C6FF3D\]:focus {
+  --tw-ring-color: var(--theme-accent-primary) !important;
+}
+
+/* Fills & Strokes */
+[data-theme] .fill-\[\#C6FF3D\] {
+  fill: var(--theme-accent-primary) !important;
+}
+
+/* Semi-transparent surface mappings */
+[data-theme] .bg-\[\#151713\]\/90,
+[data-theme] .bg-\[\#151713\]\/80,
+[data-theme] .bg-\[\#151713\]\/60 {
+  background-color: var(--theme-bg-secondary) !important;
+}
+
+/* Accent glow and tint mappings */
+[data-theme] .bg-\[\#C6FF3D\]\/5,
+[data-theme] .bg-\[\#C6FF3D\]\/10,
+[data-theme] .bg-\[\#C6FF3D\]\/20 {
+  background-color: var(--theme-accent-primary) !important;
+  opacity: 0.1 !important;
+}
+
+/* Modal and backdrop overlays */
+[data-theme] .bg-\[\#111311\]\/85,
+[data-theme] .bg-\[\#111311\]\/80,
+[data-theme] .bg-\[\#111311\]\/60,
+[data-theme] .bg-\[\#111311\]\/40 {
+  background-color: var(--theme-overlay) !important;
+}
+
+/* Button & Card glow effects */
+[data-theme] .shadow-\[0_0_20px_rgba\(198\,255\,61\,0\.25\)\],
+[data-theme] .shadow-\[0_0_15px_rgba\(198\,255\,61\,0\.12\)\] {
+  box-shadow: 0 0 20px var(--theme-accent-primary) !important;
+}
+
+/* Selection */
+[data-theme] *::selection {
+  background-color: var(--theme-accent-primary) !important;
+  color: var(--theme-accent-contrast) !important;
+}
+
+/* Input placeholder */
+[data-theme] input::placeholder,
+[data-theme] textarea::placeholder {
+  color: var(--theme-text-muted) !important;
+}
+
+/* Light mode specific enhancements */
+[data-mode="light"] input,
+[data-mode="light"] textarea,
+[data-mode="light"] select {
+  background-color: var(--theme-bg-card) !important;
+  color: var(--theme-text-primary) !important;
+  border-color: var(--theme-border) !important;
+}
+
+[data-mode="light"] input[type="checkbox"] {
+  background-color: var(--theme-bg-secondary) !important;
+  border-color: var(--theme-border) !important;
+}
+
+[data-mode="light"] .shadow-card {
+  box-shadow: 0 2px 10px -1px rgba(0, 0, 0, 0.07), 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-mode="light"] .shadow-modal {
+  box-shadow: 0 16px 40px -4px rgba(0, 0, 0, 0.16), 0 4px 12px -2px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--theme-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--theme-border);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-text-muted);
+}
+
+/* Technical background grid */
+.bg-tech-grid {
+  background-color: var(--theme-bg-primary);
+  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 0 H0 V40' fill='none' stroke='%23292D27' stroke-width='0.6'/%3E%3C/svg%3E");
+}
+
+[data-mode="light"] .bg-tech-grid {
+  background-color: var(--theme-bg-primary);
+  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 0 H0 V40' fill='none' stroke='%23DDD7CC' stroke-width='0.6'/%3E%3C/svg%3E");
+}
+
+/* Scanline animation for AI Importer */
+@keyframes scanline {
+  0% {
+    top: 0%;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+.animate-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--theme-accent-primary);
+  box-shadow: 0 0 8px var(--theme-accent-primary);
+  animation: scanline 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Monospace technical tag style */
+.tech-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ==========================================================================
+   BANNER OVERLAY CONTRAST PRESERVATION (Always crisp white on photo banners)
+   ========================================================================== */
+.banner-overlay-text,
+[data-theme] .banner-overlay-text {
+  color: #FFFFFF !important;
+}
+
+.banner-overlay-subtext,
+[data-theme] .banner-overlay-subtext {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.banner-overlay-scrim {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.6) 55%, rgba(0, 0, 0, 0.25) 100%) !important;
+}
+
