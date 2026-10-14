@@ -6,7 +6,8 @@ import {
   UserProfile, 
   CampusNotification, 
   NavigationPage, 
-  RegistrationStatus 
+  RegistrationStatus,
+  ScheduleConflict 
 } from '../types';
 import { api } from '../lib/api';
 import { useAuth } from './AuthContext';
@@ -26,6 +27,10 @@ interface EventContextType {
   notifications: CampusNotification[];
   unreadNotifCount: number;
   loading: boolean;
+  conflicts: ScheduleConflict[];
+  conflictsLoading: boolean;
+  conflictsError: string | null;
+  refreshConflicts: () => Promise<void>;
   activePage: NavigationPage;
   setActivePage: (page: NavigationPage) => void;
   searchQuery: string;
@@ -39,6 +44,8 @@ interface EventContextType {
   setIsAddTaskModalOpen: (open: boolean) => void;
   updateEventRegistration: (eventId: string, status: RegistrationStatus) => Promise<void>;
   addNewEvent: (eventData: Omit<CampusEvent, 'id'>) => Promise<CampusEvent>;
+  updateEvent: (eventId: string, updates: Partial<CampusEvent>) => Promise<CampusEvent>;
+  deleteEvent: (eventId: string) => Promise<boolean>;
   toggleTask: (taskId: string) => Promise<void>;
   addTask: (taskData: Omit<PrepTask, 'id'>) => Promise<PrepTask>;
   deleteTask: (taskId: string) => Promise<void>;
@@ -61,6 +68,9 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [notifications, setNotifications] = useState<CampusNotification[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [conflicts, setConflicts] = useState<ScheduleConflict[]>([]);
+  const [conflictsLoading, setConflictsLoading] = useState<boolean>(false);
+  const [conflictsError, setConflictsError] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<NavigationPage>('dashboard');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedEvent, setSelectedEvent] = useState<CampusEvent | null>(null);
@@ -80,6 +90,25 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const refreshConflicts = useCallback(async () => {
+    if (!isAuthenticated) {
+      setConflicts([]);
+      setConflictsError(null);
+      return;
+    }
+    try {
+      setConflictsLoading(true);
+      setConflictsError(null);
+      const res = await api.events.getConflicts();
+      setConflicts(res);
+    } catch (err: any) {
+      console.error('Failed to load schedule conflicts:', err);
+      setConflictsError(err?.message || 'Could not evaluate schedule conflicts');
+    } finally {
+      setConflictsLoading(false);
+    }
+  }, [isAuthenticated]);
+
   const refreshData = useCallback(async () => {
     if (!isAuthenticated) {
       setEvents([]);
@@ -87,24 +116,33 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setDeadlines([]);
       setProfile(null);
       setNotifications([]);
+      setConflicts([]);
+      setConflictsError(null);
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      const [allEvents, allTasks, allDeadlines, userProf, allNotifs] = await Promise.all([
+      setConflictsError(null);
+      const [allEvents, allTasks, allDeadlines, userProf, allNotifs, allConflicts] = await Promise.all([
         api.events.getAll(),
         api.tasks.getAll(),
         api.deadlines.getAll(),
         api.user.getProfile(),
         api.notifications.getAll(),
+        api.events.getConflicts().catch((err) => {
+          console.error('Failed to load schedule conflicts:', err);
+          setConflictsError(err?.message || 'Could not load conflicts');
+          return [] as ScheduleConflict[];
+        }),
       ]);
       setEvents(allEvents);
       setTasks(allTasks);
       setDeadlines(allDeadlines);
       setProfile(userProf);
       setNotifications(allNotifs);
+      setConflicts(allConflicts);
     } catch (err) {
       console.error('Failed to load campus data:', err);
       showToast('Error loading campus data', 'error');
@@ -142,18 +180,20 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (selectedEvent?.id === eventId) {
         setSelectedEvent(updated);
       }
+      refreshConflicts();
       const label = status === 'registered' ? 'Registered for event!' : status === 'not_registered' ? 'Registration cancelled' : `Status updated to ${status}`;
       showToast(label, 'success');
     } catch (err) {
       console.error(err);
       showToast('Could not update event status', 'error');
     }
-  }, [selectedEvent, showToast]);
+  }, [selectedEvent, refreshConflicts, showToast]);
 
   const addNewEvent = useCallback(async (eventData: Omit<CampusEvent, 'id'>) => {
     try {
       const created = await api.events.create(eventData);
       setEvents((prev) => [created, ...prev]);
+      refreshConflicts();
       showToast(`Added "${created.title}" to events!`, 'success');
       return created;
     } catch (err) {
@@ -161,7 +201,56 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showToast('Failed to add new event', 'error');
       throw err;
     }
-  }, [showToast]);
+  }, [refreshConflicts, showToast]);
+
+  const updateEvent = useCallback(async (eventId: string, updates: Partial<CampusEvent>) => {
+    try {
+      const updated = await api.events.update(eventId, updates);
+      setEvents((prev) => prev.map((e) => (e.id === eventId ? updated : e)));
+      if (selectedEvent?.id === eventId) {
+        setSelectedEvent(updated);
+      }
+      refreshConflicts();
+      // Re-fetch deadlines and tasks in background in case dates changed
+      Promise.all([api.deadlines.getAll(), api.tasks.getAll()]).then(([dl, tk]) => {
+        setDeadlines(dl);
+        setTasks(tk);
+      }).catch(() => {});
+      showToast(`Updated "${updated.title}" successfully!`, 'success');
+      return updated;
+    } catch (err: any) {
+      console.error('Failed to update event:', err);
+      showToast(err?.message || 'Failed to update event', 'error');
+      throw err;
+    }
+  }, [selectedEvent, refreshConflicts, showToast]);
+
+  const deleteEvent = useCallback(async (eventId: string) => {
+    try {
+      const success = await api.events.delete(eventId);
+      if (success) {
+        setEvents((prev) => prev.filter((e) => e.id !== eventId));
+        if (selectedEvent?.id === eventId) {
+          setSelectedEvent(null);
+        }
+        // Refresh tasks, deadlines, and conflicts since backend cascades task deletion
+        const [allTasks, allDeadlines, allConflicts] = await Promise.all([
+          api.tasks.getAll(),
+          api.deadlines.getAll(),
+          api.events.getConflicts().catch(() => [] as ScheduleConflict[]),
+        ]);
+        setTasks(allTasks);
+        setDeadlines(allDeadlines);
+        setConflicts(allConflicts);
+        showToast('Event deleted successfully', 'info');
+      }
+      return success;
+    } catch (err: any) {
+      console.error('Failed to delete event:', err);
+      showToast(err?.message || 'Failed to delete event', 'error');
+      throw err;
+    }
+  }, [selectedEvent, showToast]);
 
   const toggleTask = useCallback(async (taskId: string) => {
     try {
@@ -231,6 +320,10 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         notifications,
         unreadNotifCount,
         loading,
+        conflicts,
+        conflictsLoading,
+        conflictsError,
+        refreshConflicts,
         activePage,
         setActivePage,
         searchQuery,
@@ -244,6 +337,8 @@ export const EventProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsAddTaskModalOpen,
         updateEventRegistration,
         addNewEvent,
+        updateEvent,
+        deleteEvent,
         toggleTask,
         addTask,
         deleteTask,

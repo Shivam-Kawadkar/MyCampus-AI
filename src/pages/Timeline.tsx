@@ -8,11 +8,12 @@ import {
   Filter, 
   Plus, 
   CalendarDays,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
-import { CategoryBadge } from '../components/common/Badge';
-import { formatDate, formatShortDate, cn } from '../lib/utils';
+import { CategoryBadge, ConflictBadge } from '../components/common/Badge';
+import { formatDate, formatShortDate, isDeadlineExpired, cn } from '../lib/utils';
 import { CampusEvent, PrepTask, PendingDeadline } from '../types';
 
 type TimelineFilter = 'all' | 'events' | 'deadlines' | 'tasks';
@@ -27,6 +28,9 @@ interface TimelineItem {
   category?: string;
   isCompleted?: boolean;
   isUrgent?: boolean;
+  isExpired?: boolean;
+  hasConflict?: boolean;
+  conflictReason?: string;
   originalData: CampusEvent | PrepTask | PendingDeadline;
 }
 
@@ -35,6 +39,10 @@ export const Timeline: React.FC = () => {
     events, 
     tasks, 
     deadlines, 
+    conflicts,
+    conflictsLoading,
+    conflictsError,
+    refreshConflicts,
     toggleTask, 
     openEventDetail, 
     setIsAddTaskModalOpen,
@@ -49,6 +57,7 @@ export const Timeline: React.FC = () => {
 
     // 1. Events
     events.forEach((evt: CampusEvent) => {
+      const conflict = conflicts.find((c) => c.event1Id === evt.id || c.event2Id === evt.id);
       list.push({
         id: `timeline_evt_${evt.id}`,
         type: 'event',
@@ -57,12 +66,15 @@ export const Timeline: React.FC = () => {
         title: evt.title,
         subtitle: `${evt.venue} • ${evt.organizer}`,
         category: evt.category,
+        hasConflict: !!conflict,
+        conflictReason: conflict?.conflictReason,
         originalData: evt,
       });
     });
 
     // 2. Deadlines
     deadlines.forEach((dl: PendingDeadline) => {
+      const isExpired = isDeadlineExpired(dl.deadlineDate, dl.deadlineTime);
       list.push({
         id: `timeline_dl_${dl.id}`,
         type: 'deadline',
@@ -72,6 +84,7 @@ export const Timeline: React.FC = () => {
         subtitle: `Linked: ${dl.eventTitle}`,
         category: dl.category,
         isUrgent: dl.isUrgent,
+        isExpired,
         originalData: dl,
       });
     });
@@ -211,6 +224,101 @@ export const Timeline: React.FC = () => {
         </div>
       </div>
 
+      {/* Schedule Conflicts Banner & Error State */}
+      {conflictsError && (
+        <div className="bg-[#2A1512] rounded-2xl p-4 border border-[#5C231E] flex items-center justify-between gap-3 text-xs text-[#FFB4AB] shadow-card">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-[#FF7138] flex-shrink-0" />
+            <span>Could not load schedule conflicts: {conflictsError}</span>
+          </div>
+          <button
+            onClick={refreshConflicts}
+            className="px-2.5 py-1 rounded-md bg-[#22251F] text-[#F3F0E8] border border-[#353830] hover:border-[#FF7138] flex items-center gap-1.5 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Retry</span>
+          </button>
+        </div>
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="bg-[#1C1615] rounded-3xl p-5 border border-[#5C231E] shadow-card space-y-3">
+          <div className="flex items-center justify-between pb-3 border-b border-[#3E201C] flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="p-1.5 rounded-lg bg-[#2A1512] border border-[#5C231E] text-[#FF7138]">
+                <AlertTriangle className="w-4 h-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-bold font-heading text-[#F3F0E8] flex items-center gap-2">
+                  <span>Schedule Conflicts on Timeline</span>
+                  <span className="px-2 py-0.2 rounded-full text-[10px] font-mono bg-[#FF7138] text-[#111311] font-bold">
+                    {conflicts.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-[#A5A89F]">
+                  Conflicting registered events share overlapping time blocks.
+                </p>
+              </div>
+            </div>
+            {conflictsLoading && (
+              <span className="text-xs text-[#A5A89F] animate-pulse">Checking conflicts...</span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {conflicts.map((c, idx) => {
+              const e1 = events.find((e) => e.id === c.event1Id);
+              const e2 = events.find((e) => e.id === c.event2Id);
+              return (
+                <div key={idx} className="p-3.5 bg-[#151713] rounded-2xl border border-[#3E201C] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#FF7138] font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{c.conflictDate}</span>
+                    </span>
+                    <span className="text-[11px] text-[#A5A89F] font-mono">
+                      {c.event1Time} vs {c.event2Time}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-[#E0A090] font-sans leading-relaxed">
+                    {c.conflictReason}
+                  </p>
+
+                  <div className="pt-2 border-t border-[#292D27] flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 truncate">
+                      {e1 ? (
+                        <button
+                          onClick={() => openEventDetail(e1)}
+                          className="px-2 py-1 rounded bg-[#22251F] hover:bg-[#353830] text-[#F3F0E8] text-[11px] font-medium truncate max-w-[140px] border border-[#353830]"
+                          title={c.event1Title}
+                        >
+                          {c.event1Title}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[#F3F0E8] truncate max-w-[140px]">{c.event1Title}</span>
+                      )}
+                      <span className="text-[#777C72]">vs</span>
+                      {e2 ? (
+                        <button
+                          onClick={() => openEventDetail(e2)}
+                          className="px-2 py-1 rounded bg-[#22251F] hover:bg-[#353830] text-[#F3F0E8] text-[11px] font-medium truncate max-w-[140px] border border-[#353830]"
+                          title={c.event2Title}
+                        >
+                          {c.event2Title}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[#F3F0E8] truncate max-w-[140px]">{c.event2Title}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Timeline Stream */}
       <div className="space-y-8">
         {Object.entries(groupedByDate).map(([dateStr, items]) => (
@@ -237,8 +345,8 @@ export const Timeline: React.FC = () => {
                     <div
                       className={cn(
                         'absolute -left-[31px] top-4 w-4 h-4 rounded-full border-2 border-[#111311] flex items-center justify-center transition-all',
-                        isEvent && 'bg-[#C6FF3D] shadow-[0_0_8px_#C6FF3D]',
-                        isDeadline && 'bg-[#FF7138] shadow-[0_0_8px_#FF7138]',
+                        isEvent && (item.hasConflict ? 'bg-[#FF7138] shadow-[0_0_8px_#FF7138]' : 'bg-[#C6FF3D] shadow-[0_0_8px_#C6FF3D]'),
+                        isDeadline && (item.isExpired ? 'bg-[#FF7138]/60' : 'bg-[#FF7138] shadow-[0_0_8px_#FF7138]'),
                         isTask && (item.isCompleted ? 'bg-[#C6FF3D]' : 'bg-[#777C72]')
                       )}
                     />
@@ -247,8 +355,8 @@ export const Timeline: React.FC = () => {
                     <div
                       className={cn(
                         'bg-[#1A1D19] rounded-2xl p-4 sm:p-5 border transition-all duration-200 shadow-card flex items-start justify-between gap-4',
-                        isEvent && 'border-[#353830] hover:border-[#C6FF3D] cursor-pointer',
-                        isDeadline && 'border-[#353830] hover:border-[#FF7138]',
+                        isEvent && (item.hasConflict ? 'border-[#5C231E] bg-[#1C1615] hover:border-[#FF7138] cursor-pointer' : 'border-[#353830] hover:border-[#C6FF3D] cursor-pointer'),
+                        isDeadline && (item.isExpired ? 'border-[#353830] bg-[#171916] opacity-80 hover:border-[#FF7138]' : 'border-[#353830] hover:border-[#FF7138]'),
                         isTask && (item.isCompleted ? 'border-[#292D27] bg-[#151713] opacity-60' : 'border-[#353830] hover:border-[#C6FF3D]')
                       )}
                       onClick={() => {
@@ -278,7 +386,17 @@ export const Timeline: React.FC = () => {
                             </span>
                           )}
 
-                          {item.isUrgent && (
+                          {isEvent && item.hasConflict && (
+                            <ConflictBadge label="Schedule Conflict" />
+                          )}
+
+                          {isDeadline && item.isExpired && (
+                            <span className="text-[10px] font-semibold text-[#FF7138] bg-[#2A1810] px-1.5 py-0.5 rounded border border-[#5C2D1E]">
+                              Closed
+                            </span>
+                          )}
+
+                          {item.isUrgent && !item.isExpired && (
                             <span className="text-[10px] font-semibold text-[#FF7138] bg-[#22251F] px-1.5 py-0.5 rounded border border-[#353830]">
                               Urgent
                             </span>
@@ -299,6 +417,14 @@ export const Timeline: React.FC = () => {
                         {item.subtitle && (
                           <p className="text-xs text-[#A5A89F] mt-1 font-sans leading-relaxed">
                             {item.subtitle}
+                          </p>
+                        )}
+
+                        {/* Conflict Reason Hint */}
+                        {isEvent && item.hasConflict && item.conflictReason && (
+                          <p className="text-xs text-[#E0A090] mt-1.5 flex items-center gap-1.5 font-medium">
+                            <AlertTriangle className="w-3.5 h-3.5 text-[#FF7138] flex-shrink-0" />
+                            <span>{item.conflictReason}</span>
                           </p>
                         )}
                       </div>

@@ -21,11 +21,10 @@ import { CampusEvent, EventCategory } from '../types';
 import { formatDate } from '../lib/utils';
 
 export const DiscoverEvents: React.FC = () => {
-  const { events, openEventDetail, updateEventRegistration } = useEvents();
+  const { events, openEventDetail, updateEventRegistration, searchQuery, setSearchQuery } = useEvents();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedVenue, setSelectedVenue] = useState<string>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const featuredEvent = events.find((e: CampusEvent) => e.isFeatured) || events[0];
 

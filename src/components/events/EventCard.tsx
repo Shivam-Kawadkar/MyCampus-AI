@@ -1,8 +1,8 @@
 import React from 'react';
 import { Calendar, Clock, MapPin, Users, ArrowUpRight, CheckCircle2 } from 'lucide-react';
 import { CampusEvent } from '../../types';
-import { CategoryBadge, StatusBadge } from '../common/Badge';
-import { formatDate, getDaysRemaining } from '../../lib/utils';
+import { CategoryBadge, StatusBadge, ConflictBadge } from '../common/Badge';
+import { formatDate, getDaysRemaining, isDeadlineExpired } from '../../lib/utils';
 import { useEvents } from '../../context/EventContext';
 
 interface EventCardProps {
@@ -16,8 +16,13 @@ export const EventCard: React.FC<EventCardProps> = ({
   onSelect, 
   showQuickRegister = false 
 }) => {
-  const { openEventDetail, updateEventRegistration } = useEvents();
+  const { openEventDetail, updateEventRegistration, conflicts } = useEvents();
   const daysLeft = getDaysRemaining(event.startDate);
+  const isClosed = isDeadlineExpired(event.registrationDeadline);
+  const isRegistered = event.registrationStatus === 'registered';
+  const hasConflict = conflicts.some(
+    (c) => c.event1Id === event.id || c.event2Id === event.id
+  );
 
   const handleCardClick = () => {
     if (onSelect) {
@@ -29,9 +34,9 @@ export const EventCard: React.FC<EventCardProps> = ({
 
   const handleRegisterToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (event.registrationStatus === 'registered') {
+    if (isRegistered) {
       updateEventRegistration(event.id, 'not_registered');
-    } else {
+    } else if (!isClosed) {
       updateEventRegistration(event.id, 'registered');
     }
   };
@@ -54,9 +59,12 @@ export const EventCard: React.FC<EventCardProps> = ({
         />
 
         {/* Top Badges */}
-        <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
+        <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-1.5 flex-wrap">
           <CategoryBadge category={event.category} />
-          <StatusBadge status={event.registrationStatus} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {hasConflict && <ConflictBadge label="Conflict" />}
+            <StatusBadge status={event.registrationStatus} isDeadlineExpired={isClosed} />
+          </div>
         </div>
 
         {/* Days Left Chip */}
@@ -134,17 +142,23 @@ export const EventCard: React.FC<EventCardProps> = ({
             {showQuickRegister && (
               <button
                 onClick={handleRegisterToggle}
+                disabled={!isRegistered && isClosed}
+                title={!isRegistered && isClosed ? 'Registration deadline has passed' : undefined}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 ${
-                  event.registrationStatus === 'registered'
+                  isRegistered
                     ? 'bg-[#22251F] text-[#C6FF3D] border border-[#353830] hover:border-[#C6FF3D]'
+                    : isClosed
+                    ? 'bg-[#1D1F1C] text-[#777C72] border border-[#2D302A] cursor-not-allowed opacity-75'
                     : 'bg-[#C6FF3D] text-[#111311] font-semibold hover:bg-[#C6FF3D]/90'
                 }`}
               >
-                {event.registrationStatus === 'registered' ? (
+                {isRegistered ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Registered</span>
                   </>
+                ) : isClosed ? (
+                  <span>Closed</span>
                 ) : (
                   <span>Register</span>
                 )}

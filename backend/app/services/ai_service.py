@@ -244,6 +244,12 @@ class GeminiProvider(BaseAIProvider):
         self.endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
 
     async def _call_gemini(self, contents: list) -> Dict[str, Any]:
+        candidate_models = [self.model, "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3-flash-preview"]
+        unique_models = []
+        for m in candidate_models:
+            if m and m not in unique_models:
+                unique_models.append(m)
+
         params = {"key": self.api_key}
         payload = {
             "contents": contents,
@@ -256,31 +262,44 @@ class GeminiProvider(BaseAIProvider):
             }
         }
 
+        last_error = "No candidate models available."
         async with httpx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(self.endpoint, params=params, json=payload)
-            if resp.status_code != 200:
-                error_detail = resp.text
+            for current_model in unique_models:
+                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent"
                 try:
-                    err_json = resp.json()
-                    error_detail = err_json.get("error", {}).get("message", error_detail)
-                except Exception:
-                    pass
-                raise ValueError(f"Gemini API error (HTTP {resp.status_code}): {error_detail}")
+                    resp = await client.post(endpoint, params=params, json=payload)
+                    if resp.status_code == 200:
+                        self.model = current_model
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if not candidates:
+                            continue
+                        text_output = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
+                        try:
+                            return json.loads(text_output)
+                        except json.JSONDecodeError:
+                            clean = re.sub(r"^```(?:json)?\s*", "", text_output.strip())
+                            clean = re.sub(r"\s*```$", "", clean)
+                            return json.loads(clean)
+                    
+                    error_detail = resp.text
+                    try:
+                        err_json = resp.json()
+                        error_detail = err_json.get("error", {}).get("message", error_detail)
+                    except Exception:
+                        pass
+                    last_error = f"Gemini API error (HTTP {resp.status_code}) on {current_model}: {error_detail}"
+                    
+                    # If 429 quota or 503 high demand or 404 retired, try next model in pool
+                    if resp.status_code in (429, 503, 404):
+                        continue
+                    else:
+                        raise ValueError(last_error)
+                except httpx.RequestError as req_err:
+                    last_error = f"Gemini network error on {current_model}: {str(req_err)}"
+                    continue
 
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                raise ValueError("Gemini returned no candidates.")
-
-            text_output = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "{}")
-            # Parse JSON
-            try:
-                return json.loads(text_output)
-            except json.JSONDecodeError:
-                # Strip markdown blocks if present
-                clean = re.sub(r"^```(?:json)?\s*", "", text_output.strip())
-                clean = re.sub(r"\s*```$", "", clean)
-                return json.loads(clean)
+        raise ValueError(last_error)
 
     async def extract_from_text(self, text: str) -> AIParseResult:
         try:
@@ -293,7 +312,14 @@ class GeminiProvider(BaseAIProvider):
             return sanitize_and_validate_extraction(raw_result, self.name, self.model, is_ai=True)
         except Exception as e:
             fallback = await UnconfiguredAIProvider().extract_from_text(text)
-            fallback.error_message = f"Gemini API call ({self.model}) failed: {str(e)}. Review and complete fields manually."
+            err_msg = str(e)
+            if "429" in err_msg or "quota" in err_msg.lower():
+                fallback.error_message = (
+                    "Gemini API free-tier quota limit reached (HTTP 429). "
+                    "Switched to deterministic rule-based extraction fallback. Please review and complete remaining fields below."
+                )
+            else:
+                fallback.error_message = f"Gemini API call ({self.model}) failed: {err_msg}. Review and complete fields manually."
             return fallback
 
     async def extract_from_image(self, image_bytes: bytes, mime_type: str, image_name: str) -> AIParseResult:
@@ -319,7 +345,14 @@ class GeminiProvider(BaseAIProvider):
             return sanitize_and_validate_extraction(raw_result, self.name, self.model, is_ai=True)
         except Exception as e:
             fallback = await UnconfiguredAIProvider().extract_from_image(image_bytes, mime_type, image_name)
-            fallback.error_message = f"Gemini Vision call ({self.model}) failed: {str(e)}. Enter details manually."
+            err_msg = str(e)
+            if "429" in err_msg or "quota" in err_msg.lower():
+                fallback.error_message = (
+                    "Gemini Vision free-tier quota limit reached (HTTP 429). "
+                    "Flyer image metadata loaded. Please review and complete event fields manually."
+                )
+            else:
+                fallback.error_message = f"Gemini Vision call ({self.model}) failed: {err_msg}. Enter details manually."
             return fallback
 
 
@@ -426,24 +459,100 @@ class UnconfiguredAIProvider(BaseAIProvider):
         elif any(k in lower for k in ("talk", "tech", "ai", "keynote")):
             category = "Tech Talk"
 
+        # Deterministic extraction of explicit dates, times, venues, deadlines if present in text
+        start_date = None
+        date_match = re.search(r"(?:Date|When|Start Date):\s*(\d{4}-\d{2}-\d{2})", raw, re.IGNORECASE)
+        if date_match and validate_iso_date(date_match.group(1)):
+            start_date = date_match.group(1)
+        elif not date_match:
+            iso_match = re.search(r"\b(202[5-9]-\d{2}-\d{2})\b", raw)
+            if iso_match and validate_iso_date(iso_match.group(1)):
+                start_date = iso_match.group(1)
+
+        end_date = None
+        end_date_match = re.search(r"(?:End Date|Until|To Date):\s*(\d{4}-\d{2}-\d{2})", raw, re.IGNORECASE)
+        if end_date_match and validate_iso_date(end_date_match.group(1)):
+            end_date = end_date_match.group(1)
+        elif start_date:
+            end_date = start_date
+
+        start_time = None
+        end_time = None
+        time_range = re.search(
+            r"(?:Time:\s*)?(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\s*(?:to|-)\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm))",
+            raw,
+            re.IGNORECASE
+        )
+        if time_range:
+            start_time = time_range.group(1).strip().upper()
+            end_time = time_range.group(2).strip().upper()
+        else:
+            time_single = re.search(r"(?:Time|At):\s*(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)", raw, re.IGNORECASE)
+            if time_single:
+                start_time = time_single.group(1).strip().upper()
+
+        venue = None
+        venue_match = re.search(r"(?:Venue|Location|Where):\s*([^\n\r]+)", raw, re.IGNORECASE)
+        if venue_match:
+            v_val = venue_match.group(1).strip()
+            if len(v_val) > 2:
+                venue = v_val
+
+        registration_deadline = None
+        dl_match = re.search(
+            r"(?:Registration Deadline|RSVP Deadline|Deadline|Register by|RSVP by):\s*(\d{4}-\d{2}-\d{2})",
+            raw,
+            re.IGNORECASE
+        )
+        if dl_match and validate_iso_date(dl_match.group(1)):
+            registration_deadline = dl_match.group(1)
+
+        organizer = None
+        org_match = re.search(r"(?:Organizer|Club|Hosted by|Organized by):\s*([^\n\r]+)", raw, re.IGNORECASE)
+        if org_match:
+            o_val = org_match.group(1).strip()
+            if len(o_val) > 2:
+                organizer = o_val
+
+        # Confidence calculation
+        has_date = bool(start_date)
+        has_time = bool(start_time)
+        has_venue = bool(venue)
+        if has_date and has_time and has_venue:
+            confidence = 0.75
+        elif has_date:
+            confidence = 0.55
+        else:
+            confidence = 0.35
+
+        uncertain = []
+        if not start_date:
+            uncertain.append("start_date")
+        if not start_time:
+            uncertain.append("start_time")
+        if not venue:
+            uncertain.append("venue")
+        if not registration_deadline:
+            uncertain.append("registration_deadline")
+
         raw_result = {
             "title": title_candidate,
             "category": category,
-            "organizer": None,
-            "start_date": None,
-            "start_time": None,
-            "end_date": None,
-            "end_time": None,
-            "venue": None,
+            "organizer": organizer,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": end_time,
+            "venue": venue,
             "room": None,
             "description": raw[:300].strip() if raw else None,
-            "registration_deadline": None,
+            "registration_deadline": registration_deadline,
             "registration_link": found_url,
             "tags": [category] if category else [],
             "suggested_tasks": [],
-            "confidence_score": 0.35,
-            "extracted_text": "Note: AI Provider not configured. Manual review required.",
-            "uncertain_fields": ["start_date", "start_time", "venue", "registration_deadline"]
+            "confidence_score": confidence,
+            "extracted_text": "Note: Extracted with deterministic rule-based fallback. Manual review recommended.",
+            "uncertain_fields": uncertain
         }
 
         res = sanitize_and_validate_extraction(raw_result, self.name, None, is_ai=False)

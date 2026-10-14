@@ -50,20 +50,69 @@ def test_ai_status_endpoint():
     assert "message" in data
     print(f"  -> AI Status: configured={data['configured']}, provider={data['provider']}")
 
-def test_text_extraction_validation_and_unconfigured_mode():
-    print("\n[3] Testing POST /api/ai/parse-event...")
-    # 1. Empty text check
-    r_empty = client.post("/api/ai/parse-event", json={"announcementText": "   "})
-    assert r_empty.status_code == 422, f"Expected 422 for empty text, got {r_empty.status_code}"
+def get_demo_auth_headers() -> dict:
+    """Logs in with demo1@mycampus.demo to obtain an isolated evaluation token."""
+    res = client.post("/api/auth/demo-login", json={"email": "demo1@mycampus.demo", "password": "demo123"})
+    assert res.status_code == 200, f"Demo login failed: {res.text}"
+    token = res.json()["token"]
+    return {"Authorization": f"Bearer {token}"}
 
-    # 2. Extract from announcement with URL but no deadline
+def test_unauthenticated_requests():
+    print("\n[3] Testing Unauthenticated Requests Rejection (HTTP 401)...")
+    # Verify protected AI endpoints reject requests completely lacking authorization token
+    r_no_auth_text = client.post("/api/ai/parse-event", json={"announcementText": "Valid text but no token"})
+    assert r_no_auth_text.status_code == 401, f"Expected 401 for unauthenticated text, got {r_no_auth_text.status_code}"
+
+    r_no_auth_img = client.post("/api/ai/parse-image", json={"imageUrl": "data:image/png;base64,abc", "imageName": "test.png"})
+    assert r_no_auth_img.status_code == 401, f"Expected 401 for unauthenticated image, got {r_no_auth_img.status_code}"
+
+    # Verify requests with invalid/malformed bearer tokens are also rejected with 401
+    bad_headers = {"Authorization": "Bearer invalid_malformed_token_9999"}
+    r_bad_token_text = client.post("/api/ai/parse-event", json={"announcementText": "Valid text with bad token"}, headers=bad_headers)
+    assert r_bad_token_text.status_code == 401, f"Expected 401 for bad token text, got {r_bad_token_text.status_code}"
+
+    r_bad_token_img = client.post("/api/ai/parse-image", json={"imageUrl": "data:image/png;base64,abc", "imageName": "test.png"}, headers=bad_headers)
+    assert r_bad_token_img.status_code == 401, f"Expected 401 for bad token image, got {r_bad_token_img.status_code}"
+    print("  -> Verified: protected AI endpoints strictly require valid demo authorization (HTTP 401).")
+
+def test_invalid_inputs_with_authentication():
+    print("\n[4] Testing Invalid Input Handling With Valid Demo Authentication (HTTP 422)...")
+    auth_headers = get_demo_auth_headers()
+
+    # 1. Empty announcement text
+    r_empty_text = client.post("/api/ai/parse-event", json={"announcementText": ""}, headers=auth_headers)
+    assert r_empty_text.status_code == 422, f"Expected 422 for empty text, got {r_empty_text.status_code}"
+
+    # 2. Whitespace-only announcement text
+    r_whitespace = client.post("/api/ai/parse-event", json={"announcementText": "     \n\t  "}, headers=auth_headers)
+    assert r_whitespace.status_code == 422, f"Expected 422 for whitespace text, got {r_whitespace.status_code}"
+
+    # 3. Missing required fields in announcement payload
+    r_missing_field = client.post("/api/ai/parse-event", json={}, headers=auth_headers)
+    assert r_missing_field.status_code == 422, f"Expected 422 for missing payload fields, got {r_missing_field.status_code}"
+
+    # 4. Empty image URL
+    r_empty_img = client.post("/api/ai/parse-image", json={"imageUrl": "", "imageName": "test.png"}, headers=auth_headers)
+    assert r_empty_img.status_code == 422, f"Expected 422 for empty image, got {r_empty_img.status_code}"
+
+    # 5. Corrupted base64 image data
+    r_corrupt_img = client.post("/api/ai/parse-image", json={"imageUrl": "data:image/png;base64,invalid_corrupt_data", "imageName": "bad.png"}, headers=auth_headers)
+    assert r_corrupt_img.status_code == 422, f"Expected 422 for corrupt image, got {r_corrupt_img.status_code}"
+
+    print("  -> Verified: invalid input payloads are rejected with HTTP 422 when properly authenticated.")
+
+def test_text_extraction_validation_and_unconfigured_mode():
+    print("\n[5] Testing Valid POST /api/ai/parse-event with demo authentication...")
+    auth_headers = get_demo_auth_headers()
+
+    # Extract from announcement with URL but no deadline
     announcement = """
     HackNova Collegiate Sprint 2026
     Join us for 24 hours of autonomous agent engineering.
     Venue: Engineering Quad Hall A
     RSVP Link: https://hacknova.campus.edu/apply
     """
-    r = client.post("/api/ai/parse-event", json={"announcementText": announcement})
+    r = client.post("/api/ai/parse-event", json={"announcementText": announcement}, headers=auth_headers)
     assert r.status_code == 200, f"Extraction failed: {r.text}"
     result = r.json()
 
@@ -79,18 +128,12 @@ def test_text_extraction_validation_and_unconfigured_mode():
     print(f"  -> Extracted title: '{result['title']}' without fabricated deadline (missingFields={result['missingFields']})")
 
 def test_image_extraction_validation():
-    print("\n[4] Testing POST /api/ai/parse-image validation...")
-    # 1. Empty data
-    r_empty = client.post("/api/ai/parse-image", json={"imageUrl": "", "imageName": "test.png"})
-    assert r_empty.status_code == 422
+    print("\n[6] Testing Valid POST /api/ai/parse-image with demo authentication...")
+    auth_headers = get_demo_auth_headers()
 
-    # 2. Corrupted base64
-    r_corrupt = client.post("/api/ai/parse-image", json={"imageUrl": "data:image/png;base64,invalid_corrupt_data", "imageName": "bad.png"})
-    assert r_corrupt.status_code == 422
-
-    # 3. Valid real image
+    # Valid real image
     valid_data_uri = create_test_image_data_uri(width=200, height=300, color="purple", format="PNG")
-    r_valid = client.post("/api/ai/parse-image", json={"imageUrl": valid_data_uri, "imageName": "Campus Robotics Expo.png"})
+    r_valid = client.post("/api/ai/parse-image", json={"imageUrl": valid_data_uri, "imageName": "Campus Robotics Expo.png"}, headers=auth_headers)
     assert r_valid.status_code == 200, f"Valid image extraction failed: {r_valid.text}"
     img_result = r_valid.json()
     assert "title" in img_result
@@ -98,7 +141,9 @@ def test_image_extraction_validation():
     print(f"  -> Extracted poster image result: title='{img_result['title']}'")
 
 def test_event_persistence_workflow():
-    print("\n[5] Testing End-to-End Save to SQLite Database...")
+    print("\n[7] Testing End-to-End Save to SQLite Database with demo authentication...")
+    auth_headers = get_demo_auth_headers()
+
     # Simulate saving the extracted event
     event_payload = {
         "id": "evt_ai_test_roundtrip",
@@ -124,7 +169,7 @@ def test_event_persistence_workflow():
     }
 
     # 1. Create event
-    r_create = client.post("/api/events", json=event_payload)
+    r_create = client.post("/api/events", json=event_payload, headers=auth_headers)
     assert r_create.status_code == 201, f"Failed to create event: {r_create.text}"
     created_evt = r_create.json()
     assert created_evt["id"] == "evt_ai_test_roundtrip"
@@ -139,23 +184,25 @@ def test_event_persistence_workflow():
         "priority": "medium",
         "category": "prep"
     }
-    r_task = client.post("/api/tasks", json=task_payload)
+    r_task = client.post("/api/tasks", json=task_payload, headers=auth_headers)
     assert r_task.status_code == 201
     print("  -> Associated task created in SQLite:", r_task.json()["title"])
 
     # 3. Retrieve event
-    r_get = client.get("/api/events/evt_ai_test_roundtrip")
+    r_get = client.get("/api/events/evt_ai_test_roundtrip", headers=auth_headers)
     assert r_get.status_code == 200
     assert r_get.json()["title"] == "Autonomous Agent AI Summit 2026"
 
     # 4. Clean up
-    client.delete("/api/tasks/tsk_ai_test_roundtrip")
-    client.delete("/api/events/evt_ai_test_roundtrip")
+    client.delete("/api/tasks/tsk_ai_test_roundtrip", headers=auth_headers)
+    client.delete("/api/events/evt_ai_test_roundtrip", headers=auth_headers)
     print("  -> Test records verified and cleaned up successfully.")
 
 def run_all():
     test_validators()
     test_ai_status_endpoint()
+    test_unauthenticated_requests()
+    test_invalid_inputs_with_authentication()
     test_text_extraction_validation_and_unconfigured_mode()
     test_image_extraction_validation()
     test_event_persistence_workflow()
@@ -163,3 +210,4 @@ def run_all():
 
 if __name__ == "__main__":
     run_all()
+

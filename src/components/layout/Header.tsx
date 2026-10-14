@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Bell, 
   Search, 
@@ -48,8 +48,24 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  const matchingEvents = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return events.filter((e) => {
+      const matchTitle = e.title.toLowerCase().includes(q);
+      const matchVenue = (e.venue || '').toLowerCase().includes(q);
+      const matchOrg = (e.organizer || '').toLowerCase().includes(q);
+      const matchCat = (e.category || '').toLowerCase().includes(q);
+      const matchDesc = (e.shortDescription || '').toLowerCase().includes(q);
+      const matchTags = e.tags?.some((t) => t.toLowerCase().includes(q));
+      return matchTitle || matchVenue || matchOrg || matchCat || matchDesc || matchTags;
+    }).slice(0, 5);
+  }, [events, searchQuery]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -58,6 +74,9 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
       }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setIsProfileOpen(false);
+      }
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -117,19 +136,34 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
       </div>
 
       {/* Global Search Bar */}
-      <div className="flex-1 max-w-md hidden sm:block relative">
+      <div className="flex-1 max-w-md hidden sm:block relative" ref={searchRef}>
         <div className="relative flex items-center">
           <Search className="absolute left-3.5 w-4 h-4 text-[#777C72] pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setIsSearchOpen(true)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setIsSearchOpen(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setIsSearchOpen(false);
+                setActivePage('discover');
+              } else if (e.key === 'Escape') {
+                setIsSearchOpen(false);
+              }
+            }}
             placeholder="Search events, topics, or clubs..."
             className="w-full pl-10 pr-9 py-2 bg-[#1A1D19] text-[#F3F0E8] placeholder:text-[#777C72] border border-[#353830] rounded-xl text-xs sm:text-sm focus:outline-none focus:border-[#C6FF3D] focus:ring-1 focus:ring-[#C6FF3D] transition-all font-sans"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('');
+                setIsSearchOpen(false);
+              }}
               className="absolute right-3 p-1 text-[#777C72] hover:text-[#F3F0E8] rounded-md hover:bg-[#22251F]"
               title="Clear search"
             >
@@ -137,6 +171,65 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileNav }) => {
             </button>
           )}
         </div>
+
+        {/* Live Search Quick Results Dropdown */}
+        {isSearchOpen && searchQuery.trim().length > 0 && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-[#1A1D19] border border-[#353830] rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="p-2.5 border-b border-[#2A2E26] flex items-center justify-between text-[11px] text-[#A5A89F]">
+              <span>Results for "{searchQuery}"</span>
+              <span className="font-mono text-[#C6FF3D] font-semibold">{matchingEvents.length} found</span>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto divide-y divide-[#2A2E26]/50">
+              {matchingEvents.length > 0 ? (
+                matchingEvents.map((evt) => (
+                  <button
+                    key={evt.id}
+                    type="button"
+                    onClick={() => {
+                      openEventDetail(evt);
+                      setIsSearchOpen(false);
+                    }}
+                    className="w-full text-left p-3 hover:bg-[#22251F] transition-colors flex items-start gap-3 group"
+                  >
+                    <div className="w-2 h-2 rounded-full bg-[#C6FF3D] mt-1.5 flex-shrink-0 group-hover:scale-125 transition-transform" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-xs text-[#F3F0E8] group-hover:text-[#C6FF3D] transition-colors truncate">
+                        {evt.title}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-[11px] text-[#A5A89F]">
+                        <span className="px-1.5 py-0.5 rounded bg-[#22251F] border border-[#353830] text-[10px] text-[#F3F0E8]">
+                          {evt.category}
+                        </span>
+                        <span>{evt.startDate}</span>
+                        <span>•</span>
+                        <span className="truncate">{evt.venue}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="p-4 text-center text-xs text-[#A5A89F]">
+                  No events found matching "{searchQuery}"
+                </div>
+              )}
+            </div>
+
+            <div className="p-2.5 bg-[#151713] border-t border-[#2A2E26] flex items-center justify-between">
+              <span className="text-[10px] text-[#777C72]">Press Enter to open in Discover</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSearchOpen(false);
+                  setActivePage('discover');
+                }}
+                className="text-xs text-[#C6FF3D] hover:underline font-medium"
+              >
+                View all in Discover →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Right Actions & Controls */}

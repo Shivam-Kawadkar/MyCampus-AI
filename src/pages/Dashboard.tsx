@@ -8,14 +8,16 @@ import {
   ArrowRight, 
   MapPin, 
   ChevronRight, 
+  ChevronLeft,
   BookmarkCheck,
-  Flame
+  Flame,
+  RefreshCw
 } from 'lucide-react';
 import { useEvents } from '../context/EventContext';
 import { EventCard } from '../components/events/EventCard';
 import { TaskItem } from '../components/tasks/TaskItem';
-import { CategoryBadge } from '../components/common/Badge';
-import { formatDate, getDaysRemaining } from '../lib/utils';
+import { CategoryBadge, StatusBadge } from '../components/common/Badge';
+import { formatDate, getDaysRemaining, isDeadlineExpired, getWeekDays } from '../lib/utils';
 import { CampusEvent, PrepTask, PendingDeadline } from '../types';
 
 export const Dashboard: React.FC = () => {
@@ -25,12 +27,20 @@ export const Dashboard: React.FC = () => {
     tasks, 
     deadlines, 
     profile, 
+    conflicts,
+    conflictsLoading,
+    conflictsError,
+    refreshConflicts,
     setActivePage, 
     openEventDetail,
     setIsAddEventModalOpen,
     setIsAddTaskModalOpen,
     updateEventRegistration
   } = useEvents();
+
+  // Dynamic calendar week navigation offset (0 = current week)
+  const [weekOffset, setWeekOffset] = useState<number>(0);
+  const { days: weekDaysList, rangeLabel } = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
 
   // Find the closest upcoming event from registered events
   const nextEvent = useMemo(() => {
@@ -81,16 +91,28 @@ export const Dashboard: React.FC = () => {
     });
   }, [events]);
 
-  // Week schedule dates
-  const weekDays = [
-    { day: 'Mon', date: '12', hasEvent: false, label: '' },
-    { day: 'Tue', date: '13', isToday: true, hasEvent: false, label: 'Today' },
-    { day: 'Wed', date: '14', hasEvent: false, label: '' },
-    { day: 'Thu', date: '15', hasEvent: true, label: 'RSVP' },
-    { day: 'Fri', date: '16', hasEvent: true, label: 'AI Talk' },
-    { day: 'Sat', date: '17', hasEvent: true, label: 'HackNova' },
-    { day: 'Sun', date: '18', hasEvent: true, label: 'Demos' },
-  ];
+  // Map actual saved events to the dynamically calculated week
+  const dynamicWeekDays = useMemo(() => {
+    return weekDaysList.map((wd) => {
+      const dayEvents = events.filter((e) => {
+        return e.startDate === wd.fullDate || (e.startDate <= wd.fullDate && e.endDate >= wd.fullDate);
+      });
+      const firstEvt = dayEvents[0];
+      let label = '';
+      if (firstEvt) {
+        label = firstEvt.title.length > 10 ? firstEvt.title.slice(0, 9) + '…' : firstEvt.title;
+        if (dayEvents.length > 1) {
+          label += ` (+${dayEvents.length - 1})`;
+        }
+      }
+      return {
+        ...wd,
+        hasEvent: dayEvents.length > 0,
+        events: dayEvents,
+        label,
+      };
+    });
+  }, [weekDaysList, events]);
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-16">
@@ -184,6 +206,104 @@ export const Dashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Schedule Conflicts Banner & Error State */}
+      {conflictsError && (
+        <div className="bg-[#2A1512] rounded-2xl p-4 border border-[#5C231E] flex items-center justify-between gap-3 text-xs text-[#FFB4AB] shadow-card">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-[#FF7138] flex-shrink-0" />
+            <span>Could not load schedule conflicts: {conflictsError}</span>
+          </div>
+          <button
+            onClick={refreshConflicts}
+            className="px-2.5 py-1 rounded-md bg-[#22251F] text-[#F3F0E8] border border-[#353830] hover:border-[#FF7138] flex items-center gap-1.5 transition-colors"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Retry</span>
+          </button>
+        </div>
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="bg-[#1C1615] rounded-3xl p-5 sm:p-6 border border-[#5C231E] shadow-card space-y-3">
+          <div className="flex items-center justify-between pb-3 border-b border-[#3E201C] flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="p-1.5 rounded-lg bg-[#2A1512] border border-[#5C231E] text-[#FF7138]">
+                <AlertTriangle className="w-4 h-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-bold font-heading text-[#F3F0E8] flex items-center gap-2">
+                  <span>Schedule Conflicts Detected</span>
+                  <span className="px-2 py-0.2 rounded-full text-[10px] font-mono bg-[#FF7138] text-[#111311] font-bold">
+                    {conflicts.length}
+                  </span>
+                </h3>
+                <p className="text-xs text-[#A5A89F]">
+                  You have overlapping registered events on your calendar schedule.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActivePage('timeline')}
+              className="text-xs text-[#FF7138] hover:underline flex items-center gap-1"
+            >
+              <span>View in Timeline →</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {conflicts.map((c, idx) => {
+              const e1 = events.find((e) => e.id === c.event1Id);
+              const e2 = events.find((e) => e.id === c.event2Id);
+              return (
+                <div key={idx} className="p-3.5 bg-[#151713] rounded-2xl border border-[#3E201C] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-[#FF7138] font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>{c.conflictDate}</span>
+                    </span>
+                    <span className="text-[11px] text-[#A5A89F] font-mono">
+                      {c.event1Time} vs {c.event2Time}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-[#E0A090] font-sans leading-relaxed">
+                    {c.conflictReason}
+                  </p>
+
+                  <div className="pt-2 border-t border-[#292D27] flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 truncate">
+                      {e1 ? (
+                        <button
+                          onClick={() => openEventDetail(e1)}
+                          className="px-2 py-1 rounded bg-[#22251F] hover:bg-[#353830] text-[#F3F0E8] text-[11px] font-medium truncate max-w-[140px] border border-[#353830]"
+                          title={c.event1Title}
+                        >
+                          {c.event1Title}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[#F3F0E8] truncate max-w-[140px]">{c.event1Title}</span>
+                      )}
+                      <span className="text-[#777C72]">vs</span>
+                      {e2 ? (
+                        <button
+                          onClick={() => openEventDetail(e2)}
+                          className="px-2 py-1 rounded bg-[#22251F] hover:bg-[#353830] text-[#F3F0E8] text-[11px] font-medium truncate max-w-[140px] border border-[#353830]"
+                          title={c.event2Title}
+                        >
+                          {c.event2Title}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[#F3F0E8] truncate max-w-[140px]">{c.event2Title}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Metrics Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -283,101 +403,115 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Featured Event Spotlight */}
-      {nextEvent && (
-        <div className="bg-[#151713] rounded-3xl border border-[#353830] p-6 sm:p-8 shadow-card">
-          <div className="flex items-center justify-between pb-4 border-b border-[#353830] mb-6">
-            <div className="flex items-center gap-2">
-              <Flame className="w-4 h-4 text-[#FF7138]" />
-              <h3 className="font-heading font-bold text-sm text-[#F3F0E8]">
-                Featured Event
-              </h3>
-            </div>
-            <span className="text-xs text-[#C6FF3D] bg-[#22251F] px-2.5 py-1 rounded border border-[#353830]">
-              {nextEvent.registrationStatus === 'registered' ? 'Registered' : 'Available'}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-            {/* Visual Poster */}
-            <div className="lg:col-span-5 h-56 rounded-2xl overflow-hidden bg-[#22251F] border border-[#353830] relative group">
-              <img
-                src={nextEvent.bannerImage}
-                alt={nextEvent.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-75"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-              <div className="absolute inset-0 bg-[#111311]/40" />
-
-              <div className="absolute top-3 left-3">
-                <CategoryBadge category={nextEvent.category} />
+      {nextEvent && (() => {
+        const nextEventClosed = isDeadlineExpired(nextEvent.registrationDeadline);
+        const isNextReg = nextEvent.registrationStatus === 'registered';
+        return (
+          <div className="bg-[#151713] rounded-3xl border border-[#353830] p-6 sm:p-8 shadow-card">
+            <div className="flex items-center justify-between pb-4 border-b border-[#353830] mb-6 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Flame className="w-4 h-4 text-[#FF7138]" />
+                <h3 className="font-heading font-bold text-sm text-[#F3F0E8]">
+                  Featured Event
+                </h3>
               </div>
+              <StatusBadge status={nextEvent.registrationStatus} isDeadlineExpired={nextEventClosed} />
             </div>
 
-            {/* Event Details */}
-            <div className="lg:col-span-7 space-y-4">
-              <div className="space-y-1">
-                <p className="text-xs text-[#777C72]">
-                  Hosted by {nextEvent.organizer}
-                </p>
-                <h2 className="text-xl sm:text-2xl font-bold font-heading text-[#F3F0E8] tracking-tight">
-                  {nextEvent.title}
-                </h2>
-              </div>
-
-              <p className="text-xs sm:text-sm text-[#A5A89F] leading-relaxed">
-                {nextEvent.shortDescription}
-              </p>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
-                <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] min-w-0">
-                  <span className="text-[11px] text-[#777C72] block font-medium">Schedule</span>
-                  <p className="text-xs font-semibold text-[#F3F0E8] mt-0.5 truncate">{formatDate(nextEvent.startDate)}</p>
-                  <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.startTime}</p>
-                </div>
-
-                <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] min-w-0">
-                  <span className="text-[11px] text-[#777C72] block font-medium">Venue</span>
-                  <p className="text-xs font-semibold text-[#F3F0E8] mt-0.5 truncate" title={nextEvent.venue}>{nextEvent.venue}</p>
-                  <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.room || 'Main Hall'}</p>
-                </div>
-
-                <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] col-span-2 sm:col-span-1 min-w-0">
-                  <span className="text-[11px] text-[#777C72] block font-medium">RSVP Deadline</span>
-                  <p className="text-xs font-semibold text-[#FF7138] mt-0.5 truncate">{formatDate(nextEvent.registrationDeadline)}</p>
-                  <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.registrationFee || 'Free'}</p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  onClick={() => openEventDetail(nextEvent)}
-                  className="px-4 py-2.5 rounded-xl bg-[#C6FF3D] hover:bg-[#C6FF3D]/90 text-[#111311] font-semibold text-xs transition-all shadow-card flex items-center gap-1.5"
-                >
-                  <span>View Details</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => {
-                    updateEventRegistration(
-                      nextEvent.id,
-                      nextEvent.registrationStatus === 'registered' ? 'not_registered' : 'registered'
-                    );
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+              {/* Visual Poster */}
+              <div className="lg:col-span-5 h-56 rounded-2xl overflow-hidden bg-[#22251F] border border-[#353830] relative group">
+                <img
+                  src={nextEvent.bannerImage}
+                  alt={nextEvent.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-75"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
                   }}
-                  className={`px-4 py-2.5 rounded-xl border border-[#353830] text-xs transition-colors ${
-                    nextEvent.registrationStatus === 'registered'
-                      ? 'bg-[#22251F] text-[#FF7138] hover:border-[#FF7138]'
-                      : 'bg-[#22251F] text-[#C6FF3D] hover:border-[#C6FF3D]'
-                  }`}
-                >
-                  {nextEvent.registrationStatus === 'registered' ? 'Cancel RSVP' : 'Register'}
-                </button>
+                />
+                <div className="absolute inset-0 bg-[#111311]/40" />
+
+                <div className="absolute top-3 left-3">
+                  <CategoryBadge category={nextEvent.category} />
+                </div>
+              </div>
+
+              {/* Event Details */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-[#777C72]">
+                    Hosted by {nextEvent.organizer}
+                  </p>
+                  <h2 className="text-xl sm:text-2xl font-bold font-heading text-[#F3F0E8] tracking-tight">
+                    {nextEvent.title}
+                  </h2>
+                </div>
+
+                <p className="text-xs sm:text-sm text-[#A5A89F] leading-relaxed">
+                  {nextEvent.shortDescription}
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
+                  <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] min-w-0">
+                    <span className="text-[11px] text-[#777C72] block font-medium">Schedule</span>
+                    <p className="text-xs font-semibold text-[#F3F0E8] mt-0.5 truncate">{formatDate(nextEvent.startDate)}</p>
+                    <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.startTime}</p>
+                  </div>
+
+                  <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] min-w-0">
+                    <span className="text-[11px] text-[#777C72] block font-medium">Venue</span>
+                    <p className="text-xs font-semibold text-[#F3F0E8] mt-0.5 truncate" title={nextEvent.venue}>{nextEvent.venue}</p>
+                    <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.room || 'Main Hall'}</p>
+                  </div>
+
+                  <div className="bg-[#1A1D19] p-3 rounded-xl border border-[#353830] col-span-2 sm:col-span-1 min-w-0">
+                    <span className="text-[11px] text-[#777C72] block font-medium">RSVP Deadline</span>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <p className="text-xs font-semibold text-[#FF7138] truncate">{formatDate(nextEvent.registrationDeadline)}</p>
+                      {nextEventClosed && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#2A1810] text-[#FF7138] border border-[#5C2D1E] font-medium flex-shrink-0">
+                          Closed
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#A5A89F] truncate">{nextEvent.registrationFee || 'Free'}</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center gap-3">
+                  <button
+                    onClick={() => openEventDetail(nextEvent)}
+                    className="px-4 py-2.5 rounded-xl bg-[#C6FF3D] hover:bg-[#C6FF3D]/90 text-[#111311] font-semibold text-xs transition-all shadow-card flex items-center gap-1.5"
+                  >
+                    <span>View Details</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (isNextReg) {
+                        updateEventRegistration(nextEvent.id, 'not_registered');
+                      } else if (!nextEventClosed) {
+                        updateEventRegistration(nextEvent.id, 'registered');
+                      }
+                    }}
+                    disabled={!isNextReg && nextEventClosed}
+                    title={!isNextReg && nextEventClosed ? 'Registration deadline has passed' : undefined}
+                    className={`px-4 py-2.5 rounded-xl border text-xs transition-colors ${
+                      isNextReg
+                        ? 'bg-[#22251F] text-[#FF7138] border-[#353830] hover:border-[#FF7138]'
+                        : nextEventClosed
+                        ? 'bg-[#1D1F1C] text-[#777C72] border-[#2D302A] cursor-not-allowed opacity-75'
+                        : 'bg-[#22251F] text-[#C6FF3D] border-[#353830] hover:border-[#C6FF3D]'
+                    }`}
+                  >
+                    {isNextReg ? 'Cancel RSVP' : nextEventClosed ? 'Registration Closed' : 'Register'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Upcoming Events Rail */}
       <div className="space-y-4">
@@ -408,32 +542,67 @@ export const Dashboard: React.FC = () => {
         
         {/* Weekly Schedule Strip */}
         <div className="lg:col-span-7 bg-[#151713] rounded-3xl p-5 sm:p-6 border border-[#353830] shadow-card space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#353830]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#353830] gap-2">
             <div>
               <h3 className="text-sm font-bold font-heading text-[#F3F0E8]">
                 Weekly Schedule
               </h3>
-              <p className="text-xs text-[#777C72]">October 12 – 18, 2026</p>
+              <p className="text-xs text-[#777C72]">{rangeLabel}</p>
             </div>
-            <button
-              onClick={() => setActivePage('timeline')}
-              className="text-xs text-[#C6FF3D] hover:underline flex items-center gap-1"
-            >
-              <span>View timeline →</span>
-            </button>
+            
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              {weekOffset !== 0 && (
+                <button
+                  onClick={() => setWeekOffset(0)}
+                  className="px-2 py-1 rounded text-[11px] bg-[#22251F] text-[#C6FF3D] hover:bg-[#C6FF3D] hover:text-[#111311] border border-[#353830] transition-colors"
+                >
+                  Today
+                </button>
+              )}
+              <div className="flex items-center rounded-lg bg-[#1A1D19] border border-[#353830] p-0.5">
+                <button
+                  onClick={() => setWeekOffset((prev) => prev - 1)}
+                  className="p-1.5 rounded text-[#A5A89F] hover:text-[#F3F0E8] hover:bg-[#22251F] transition-colors"
+                  title="Previous week"
+                  aria-label="Previous week"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setWeekOffset((prev) => prev + 1)}
+                  className="p-1.5 rounded text-[#A5A89F] hover:text-[#F3F0E8] hover:bg-[#22251F] transition-colors"
+                  title="Next week"
+                  aria-label="Next week"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <button
+                onClick={() => setActivePage('timeline')}
+                className="text-xs text-[#C6FF3D] hover:underline flex items-center gap-1 ml-1"
+              >
+                <span>Timeline →</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-7 gap-2">
-            {weekDays.map((wd) => (
+            {dynamicWeekDays.map((wd) => (
               <div
                 key={wd.day}
+                onClick={() => {
+                  if (wd.events.length > 0) {
+                    openEventDetail(wd.events[0]);
+                  }
+                }}
                 className={`p-2.5 rounded-xl border text-center transition-all ${
                   wd.isToday
                     ? 'bg-[#C6FF3D] text-[#111311] border-[#C6FF3D] font-bold shadow-card'
                     : wd.hasEvent
-                    ? 'bg-[#1A1D19] text-[#F3F0E8] border-[#353830]'
-                    : 'bg-[#151713] text-[#777C72] border-[#22251F]'
+                    ? 'bg-[#1A1D19] text-[#F3F0E8] border-[#353830] hover:border-[#C6FF3D] cursor-pointer'
+                    : 'bg-[#151713] text-[#777C72] border-[#22251F] cursor-default'
                 }`}
+                title={wd.hasEvent ? `${wd.events.length} event(s): ${wd.events.map((e) => e.title).join(', ')}` : undefined}
               >
                 <span className={`text-[10px] block ${wd.isToday ? 'text-[#111311] font-semibold' : 'text-[#777C72]'}`}>
                   {wd.day}
@@ -460,32 +629,39 @@ export const Dashboard: React.FC = () => {
             <span className="text-xs text-[#777C72] font-medium block">
               Deadlines
             </span>
-            {deadlines.map((dl: PendingDeadline) => (
-              <div key={dl.id} className="p-3 bg-[#1A1D19] rounded-xl border border-[#353830] flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-[#F3F0E8] truncate">{dl.title}</span>
-                    {dl.isUrgent && (
-                      <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#22251F] text-[#FF7138] border border-[#353830]">
-                        Urgent
-                      </span>
-                    )}
+            {deadlines.map((dl: PendingDeadline) => {
+              const isDlExpired = isDeadlineExpired(dl.deadlineDate, dl.deadlineTime);
+              return (
+                <div key={dl.id} className="p-3 bg-[#1A1D19] rounded-xl border border-[#353830] flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-[#F3F0E8] truncate">{dl.title}</span>
+                      {isDlExpired ? (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#2A1810] text-[#FF7138] border border-[#5C2D1E] font-medium">
+                          Closed
+                        </span>
+                      ) : dl.isUrgent ? (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#22251F] text-[#FF7138] border border-[#353830]">
+                          Urgent
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-[11px] text-[#777C72] mt-0.5">
+                      {dl.eventTitle} • Due {formatDate(dl.deadlineDate)}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-[#777C72] mt-0.5">
-                    {dl.eventTitle} • Due {formatDate(dl.deadlineDate)}
-                  </p>
+                  <button
+                    onClick={() => {
+                      const related = events.find((e) => e.id === dl.eventId);
+                      if (related) openEventDetail(related);
+                    }}
+                    className="px-2.5 py-1 rounded bg-[#22251F] hover:bg-[#C6FF3D] hover:text-[#111311] text-[#C6FF3D] text-xs font-medium border border-[#353830] transition-colors"
+                  >
+                    View
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    const related = events.find((e) => e.id === dl.eventId);
-                    if (related) openEventDetail(related);
-                  }}
-                  className="px-2.5 py-1 rounded bg-[#22251F] hover:bg-[#C6FF3D] hover:text-[#111311] text-[#C6FF3D] text-xs font-medium border border-[#353830] transition-colors"
-                >
-                  View
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

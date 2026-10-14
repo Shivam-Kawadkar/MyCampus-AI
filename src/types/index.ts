@@ -107,6 +107,17 @@ export interface UserProfile {
   };
 }
 
+export interface ScheduleConflict {
+  event1Id: string;
+  event1Title: string;
+  event2Id: string;
+  event2Title: string;
+  conflictDate: string;
+  event1Time: string;
+  event2Time: string;
+  conflictReason: string;
+}
+
 export interface CampusNotification {
   id: string;
   title: string;
